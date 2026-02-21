@@ -1,0 +1,4 @@
+serverUrl: "https://localhost:4533"
+username: "admin"
+password: "1234"
+customCa: "cert.pem"
