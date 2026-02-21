@@ -6,16 +6,20 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"time"
 )
 
 type LocalPlayer struct {
 	queue         []string
+	index         int
 	downloader    Downloader
+	updater       StatusUpdater
 	playNotifier  chan io.ReadCloser
 	pauseNotifier chan struct{}
 	stopNotifier  chan struct{}
 	playbackEnd   chan error
 	loopEnded     chan error
+	gain          float32
 }
 
 // Done implements [Player].
@@ -23,9 +27,10 @@ func (m *LocalPlayer) Done() chan error {
 	return m.loopEnded
 }
 
-func NewPlayer(d Downloader) *LocalPlayer {
+func NewPlayer(d Downloader, u StatusUpdater) *LocalPlayer {
 	p := LocalPlayer{
 		downloader:    d,
+		updater:       u,
 		playNotifier:  make(chan io.ReadCloser),
 		pauseNotifier: make(chan struct{}),
 		stopNotifier:  make(chan struct{}),
@@ -64,11 +69,11 @@ func (m *LocalPlayer) Pause() {
 // Play implements [Player].
 func (m *LocalPlayer) Play() error {
 	log.Printf("Player: Play handler called\n")
-	if len(m.queue) == 0 {
-		return fmt.Errorf("Player: Play error: No song in queue")
+	if m.index >= len(m.queue) {
+		return fmt.Errorf("Player: Play error: No more song in queue")
 	}
 
-	reader, err := m.downloader.Download(m.queue[0])
+	reader, err := m.downloader.Download(m.queue[m.index])
 	if err != nil {
 		return err
 	}
@@ -85,11 +90,28 @@ func (m *LocalPlayer) TogglePlayPause() {
 func (m *LocalPlayer) RunPlayerLoop() {
 	var cmd *exec.Cmd
 	var endError error
+	var playbackStartTime time.Time
+	statusUpdateTicker := time.NewTicker(5 * time.Second)
+	defer statusUpdateTicker.Stop()
 
 	log.Printf("Player: Starting playback loop")
-	exit:
+exit:
 	for {
 		select {
+		case t := <-statusUpdateTicker.C:
+			status := DeviceStatus{
+				CurrentIndex: m.index,
+				Playing:      false,
+				Gain:         m.gain,
+				Position:     0,
+			}
+
+			if cmd != nil && cmd.Process != nil && cmd.ProcessState == nil {
+				status.Playing = true
+				status.Position = int(t.Sub(playbackStartTime).Seconds())
+			}
+
+			m.updater.SendStatus(status)
 		case streamReader := <-m.playNotifier:
 			if cmd != nil && cmd.Process != nil {
 				log.Printf("Player: overriding current playback process")
@@ -117,6 +139,7 @@ func (m *LocalPlayer) RunPlayerLoop() {
 				endError = err
 				break exit
 			} else {
+				playbackStartTime = time.Now()
 				go func() {
 					err := cmd.Wait()
 					streamReader.Close()
@@ -135,14 +158,23 @@ func (m *LocalPlayer) RunPlayerLoop() {
 				}
 			}
 		case err := <-m.playbackEnd:
-			if err != nil {
-				if cmd != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() >= 0 {
-					log.Printf("Player: playback ended with error: %s\n", err)
-				}
-			} else {
-				log.Printf("Player: playback ended\n")
+			if cmd == nil || cmd.ProcessState == nil {
+				// Spurious event: no command has finished (how ?). Ignore
+				log.Printf("Warning: Player: playbackEnd notification, but no process has terminated")
+				break
 			}
-			//TODO: Skip to next item in queue
+
+			if !cmd.ProcessState.Exited() {
+				// Killed by signal -> playback interrupted.
+				// TODO: deal with signals other than TERM ?
+				log.Printf("Player: playback interrupted by signal\n")
+			} else if err != nil && cmd.ProcessState.ExitCode() > 0 {
+				log.Printf("Player: playback ended with error: %s\n", err)
+			} else {
+				log.Printf("Player: playback ended successfully \n")
+				// skip to next song
+				m.index += 1
+			}
 		}
 	}
 

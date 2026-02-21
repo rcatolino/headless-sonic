@@ -69,6 +69,7 @@ func readEvent(rd *bufio.Reader) (*events.JukeboxCommand, int64, error) {
 
 func StartEventHandler(client *http.Client, baseUrl string, musicPlayer player.Player) (chan error, error) {
 	reqUrl, err := url.Parse(baseUrl)
+	log.Printf("req: %s\n", reqUrl.RequestURI())
 	if err != nil {
 		return nil, err
 	}
