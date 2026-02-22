@@ -20,6 +20,7 @@ type StatusUpdater interface {
 type Player interface {
 	Play() error
 	Pause()
+	Stop()
 	TogglePlayPause()
 	Clear()
 	Add(id string)

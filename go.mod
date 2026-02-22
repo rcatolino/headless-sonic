@@ -6,6 +6,7 @@ replace github.com/navidrome/navidrome => ../navidrome
 
 require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
+	github.com/knadh/koanf/providers/structs v1.0.0
 	github.com/knadh/koanf/v2 v2.3.2
 	github.com/navidrome/navidrome v0.0.0-00010101000000-000000000000
 )
@@ -16,6 +17,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/deluan/rest v0.0.0-20211102003136-6260bc399cbf // indirect
 	github.com/deluan/sanitize v0.0.0-20241120162836-fdfd8fdfaa55 // indirect
+	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/encoding/ini v0.1.1 // indirect
 	github.com/gohugoio/hashstructure v0.6.0 // indirect

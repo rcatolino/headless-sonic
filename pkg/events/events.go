@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"headless-sonic/pkg/player"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,7 +69,7 @@ func readEvent(rd *bufio.Reader) (*events.JukeboxCommand, int64, error) {
 
 func StartEventHandler(client *http.Client, baseUrl string, musicPlayer player.Player) (chan error, error) {
 	reqUrl, err := url.Parse(baseUrl)
-	log.Printf("req: %s\n", reqUrl.RequestURI())
+	slog.Info("Starting Event Handler", "base_url", reqUrl.RequestURI())
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,9 @@ func StartEventHandler(client *http.Client, baseUrl string, musicPlayer player.P
 }
 
 func processEvents(resp *http.Response, notificationChan chan error, musicPlayer player.Player) {
+	logger := slog.Default().With("component", "processEvents")
 	defer resp.Body.Close()
+	defer close(notificationChan)
 	rd := bufio.NewReader(resp.Body)
 	lastEv := int64(0)
 	for {
@@ -107,11 +109,11 @@ func processEvents(resp *http.Response, notificationChan chan error, musicPlayer
 
 		toprint, err := json.Marshal(event)
 		if err != nil {
-			log.Printf("json marshalling error %s\n", err)
+			logger.Warn("json marshalling error", "error", err)
 			continue
 		}
 
-		log.Printf("%d: %s\n", counter, string(toprint))
+		logger.Debug("new event received", "counter", counter, "event", string(toprint))
 		if event.Action == "set" && len(event.Ids) == 0 {
 			musicPlayer.Clear()
 		} else if event.Action == "set" {
@@ -119,11 +121,20 @@ func processEvents(resp *http.Response, notificationChan chan error, musicPlayer
 			for _, id := range event.Ids {
 				musicPlayer.Add(id)
 			}
+
+			if len(event.Ids) > 0 {
+				err := musicPlayer.Play()
+				if err != nil {
+					logger.Warn("play() returned with error", "error", err)
+				}
+			}
 		} else if event.Action == "start" {
 			err := musicPlayer.Play()
 			if err != nil {
-				log.Printf("Play error: %s\n", err)
+				logger.Warn("play() returned with error", "error", err)
 			}
+		} else if event.Action == "stop" {
+			musicPlayer.Stop()
 		}
 	}
 }
