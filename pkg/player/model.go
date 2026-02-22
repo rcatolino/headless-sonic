@@ -21,10 +21,10 @@ type Player interface {
 	Add(id string)
 	Clear()
 	Done() chan error
-	Insert(id string, index int)
+	Remove(index int)
+	SetGain(gain float32)
 	Start()
 	Skip(int, int)
 	Stop()
-	TogglePlayPause()
 }
 

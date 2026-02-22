@@ -122,15 +122,19 @@ func processEvents(resp *http.Response, notificationChan chan error, musicPlayer
 				musicPlayer.Add(id)
 			}
 
-			if len(event.Ids) > 0 {
-				musicPlayer.Start()
-			}
+			musicPlayer.Start()
 		} else if event.Action == "start" {
 			musicPlayer.Start()
 		} else if event.Action == "stop" {
 			musicPlayer.Stop()
 		} else if event.Action == "skip" {
 			musicPlayer.Skip(event.Index, event.Offset)
+		} else if event.Action == "remove" {
+			musicPlayer.Remove(event.Index)
+		} else if event.Action == "setGain" {
+			musicPlayer.SetGain(event.Gain)
+		} else {
+			logger.Warn("received unimplemented event action", "action", event.Action)
 		}
 	}
 }

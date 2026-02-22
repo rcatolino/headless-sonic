@@ -14,6 +14,7 @@ type LocalPlayer struct {
 	queueMutex    sync.Mutex
 	downloader    Downloader
 	updater       StatusUpdater
+	gainNotifier  chan float32
 	startNotifier chan struct{}
 	stopNotifier  chan struct{}
 	clearNotifier chan struct{}
@@ -39,6 +40,7 @@ func NewPlayer(d Downloader, u StatusUpdater) *LocalPlayer {
 	p := LocalPlayer{
 		downloader:    d,
 		updater:       u,
+		gainNotifier:  make(chan float32),
 		startNotifier: make(chan struct{}),
 		stopNotifier:  make(chan struct{}),
 		clearNotifier: make(chan struct{}),
@@ -70,17 +72,21 @@ func (m *LocalPlayer) Clear() {
 	m.clearNotifier <- struct{}{}
 }
 
-// Insert implements [Player].
-func (m *LocalPlayer) Insert(id string, index int) {
-	m.logger.Debug("Insert handler called")
+func (m *LocalPlayer) Remove(index int) {
+	m.logger.Debug("Remove handler called", "index", index)
 	m.queueMutex.Lock()
 	defer m.queueMutex.Unlock()
 
-	q := append(m.queue[:index], id)
-	m.queue = append(q, m.queue[index:]...)
+	panic("unimplemented")
+}
+
+func (m *LocalPlayer) SetGain(gain float32) {
+	m.logger.Debug("SetGain handler called", "gain", gain)
+	m.gainNotifier <- gain
 }
 
 func (m *LocalPlayer) Skip(index int, offset int) {
+	m.logger.Debug("Skip handler called", "index", index, "offset", offset)
 	m.skipNotifier <- skipPayload{
 		index:  index,
 		offset: offset,
@@ -88,23 +94,19 @@ func (m *LocalPlayer) Skip(index int, offset int) {
 }
 
 func (m *LocalPlayer) Stop() {
+	m.logger.Debug("Stop handler called")
 	m.stopNotifier <- struct{}{}
 }
 
 // Start implements [Player].
 func (m *LocalPlayer) Start() {
-	m.logger.Debug("Play handler called")
+	m.logger.Debug("Start handler called")
 	m.startNotifier <- struct{}{}
-}
-
-// TogglePlayPause implements [Player].
-func (m *LocalPlayer) TogglePlayPause() {
-	panic("unimplemented")
 }
 
 func (m *LocalPlayer) RunPlayerLoop() {
 	state := playbackState{
-		gain: 1,
+		gain: 0.5,
 	}
 	var endError error
 	statusUpdateTicker := time.NewTicker(5 * time.Second)
@@ -117,6 +119,14 @@ exit:
 		select {
 		case t := <-statusUpdateTicker.C:
 			m.sendStatus(t, &state)
+		case gain := <-m.gainNotifier:
+			state.gain = gain
+			volumePct := fmt.Sprintf("%d%%", int(100*state.gain))
+			gainCmd := exec.Command("pactl", "set-sink-volume", "@DEFAULT_SINK@", volumePct)
+			err := gainCmd.Run()
+			if err != nil {
+				m.logger.Warn("Failed to set volume using pactl", "error", err, "volume", volumePct)
+			}
 		case <-m.startNotifier:
 			endError = m.startPlayback(&state)
 			if endError != nil {
@@ -153,7 +163,7 @@ exit:
 				// TODO: deal with signals other than TERM ?
 				m.logger.Info("playback interrupted", "index", state.index, "song_id", sid, "offset", state.offset)
 			} else if err != nil && state.cmd.ProcessState.ExitCode() > 0 {
-				// This can happend if the audio format is invalid/unsupported. Maybe skip to next song in this case ?
+				// This can happen if the audio format is invalid/unsupported. Maybe skip to next song in this case ?
 				m.logger.Warn("playback ended with errors", "error", err)
 			} else {
 				m.logger.Info("playback end", "index", state.index, "song_id", sid)
