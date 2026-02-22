@@ -2,8 +2,10 @@ package events
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"headless-sonic/pkg/config"
 	"headless-sonic/pkg/player"
 	"log/slog"
 	"net/http"
@@ -67,19 +69,24 @@ func readEvent(rd *bufio.Reader) (*events.JukeboxCommand, int64, error) {
 	return &cmd, counter, nil
 }
 
-func StartEventHandler(client *http.Client, baseUrl string, musicPlayer player.Player) (chan error, error) {
+func StartEventHandler(client *http.Client, cfg *config.Config, baseUrl string, musicPlayer player.Player) (chan error, error) {
 	reqUrl, err := url.Parse(baseUrl)
+	reqUrl.Path = "/api/events"
 	slog.Info("Starting Event Handler", "base_url", reqUrl.RequestURI())
 	if err != nil {
 		return nil, err
 	}
 
-	reqUrl.Path = "/api/events"
 	req, err := http.NewRequest("GET", reqUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
+	token := fmt.Sprintf(
+		"Basic %s",
+		base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "%s:%s", cfg.Username, cfg.Password)),
+	)
+	req.Header.Set("Authorization", token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

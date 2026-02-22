@@ -1,4 +1,4 @@
-sources := $(wildcard *.go) $(wildcard **/*.go)
+sources := $(wildcard pkg/**/*.go) $(wildcard cmd/**/*.go)
 bin := headless-sonic
 
 .PHONY: build clean

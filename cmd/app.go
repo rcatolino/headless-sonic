@@ -96,7 +96,7 @@ func run() int {
 	}
 
 	p := player.NewPlayer(client, &statusUpdater)
-	c, err := events.StartEventHandler(client.Client, client.BaseUrl, p)
+	c, err := events.StartEventHandler(client.Client, cfg, client.BaseUrl, p)
 	if err != nil {
 		slog.Error("Failed to start event handler", "error", err)
 		return 1
