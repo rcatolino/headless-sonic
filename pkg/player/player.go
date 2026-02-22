@@ -19,7 +19,7 @@ type LocalPlayer struct {
 	stopNotifier  chan struct{}
 	clearNotifier chan struct{}
 	skipNotifier  chan skipPayload
-	playbackEnd   chan error
+	playbackEnd   chan playbackEndPayload
 	loopEnded     chan error
 	logger        *slog.Logger
 }
@@ -29,6 +29,13 @@ var _ Player = &LocalPlayer{}
 type skipPayload struct {
 	index  int
 	offset int
+}
+
+type playbackEndPayload struct {
+	err          error
+	cmdProcState *os.ProcessState
+	sid          string
+	index        int
 }
 
 // Done implements [Player].
@@ -45,7 +52,7 @@ func NewPlayer(d Downloader, u StatusUpdater) *LocalPlayer {
 		stopNotifier:  make(chan struct{}),
 		clearNotifier: make(chan struct{}),
 		skipNotifier:  make(chan skipPayload),
-		playbackEnd:   make(chan error),
+		playbackEnd:   make(chan playbackEndPayload),
 		loopEnded:     make(chan error),
 		logger:        slog.Default().With("component", "LocalPlayer"),
 	}
@@ -146,27 +153,22 @@ exit:
 			if endError != nil {
 				break exit
 			}
-		case err := <-m.playbackEnd:
-			if state.cmd == nil {
-				// Spurious event: no command has finished (how ?). Ignore
-				m.logger.Warn("playbackEnd notification, but no process was started")
-				break
-			}
-
+		case payload := <-m.playbackEnd:
+			// Note: the state may have changed by the time we receive this event,
+			// we must rely on the content of the payload only to for the state relating to the playback which has ended
 			state.offset = time.Since(state.startTime)
-			sid, _ := m.getQueueItem(&state)
-			if state.cmd.ProcessState == nil || !state.cmd.ProcessState.Exited() {
-				// I don't understand how the ProcessState can be nil, but sometimes it is...
-				// Handle this case as an 'interrupted' playback.
+			if payload.cmdProcState == nil || !payload.cmdProcState.Exited() {
+				// cmdProcState can be nil if the command was Wait-ed upon outside of the main proc waiter.
+				// But this can only happen if the process was interrupted manually (on overide/skip)
 				// Otherwise, killed by signal -> playback interrupted.
 				// we conserve the current offset in this case, to be able to resume later
 				// TODO: deal with signals other than TERM ?
-				m.logger.Info("playback interrupted", "index", state.index, "song_id", sid, "offset", state.offset)
-			} else if err != nil && state.cmd.ProcessState.ExitCode() > 0 {
+				m.logger.Info("playback interrupted", "index", payload.index, "song_id", payload.sid, "offset", state.offset)
+			} else if payload.err != nil && payload.cmdProcState.ExitCode() > 0 {
 				// This can happen if the audio format is invalid/unsupported. Maybe skip to next song in this case ?
-				m.logger.Warn("playback ended with errors", "error", err)
+				m.logger.Warn("playback ended with errors", "error", payload.err)
 			} else {
-				m.logger.Info("playback end", "index", state.index, "song_id", sid)
+				m.logger.Info("playback end", "index", payload.index, "song_id", payload.sid)
 				// move to next song
 				state.offset = 0
 				state.index += 1
@@ -222,7 +224,7 @@ func (m *LocalPlayer) stopCurrentPlayback(cmd *exec.Cmd) {
 		}
 		s, err := cmd.Process.Wait()
 		m.logger.Debug("subprocess has ended", "state", s)
-		if err != nil {
+		if err != nil && err.Error() != "waitid: no child processes" {
 			m.logger.Warn("error while waiting for subprocess end", "error", err)
 		}
 	}
@@ -266,11 +268,20 @@ func (m *LocalPlayer) startPlayback(state *playbackState) error {
 		return err // If we can't actuall play the songs then we might as well give up
 	} else {
 		state.startTime = time.Now().Add(-state.offset)
-		m.logger.Info("playback start", "song_id", sid, "offset", state.offset)
+		m.logger.Info("playback start", "index", state.index, "song_id", sid, "offset", state.offset)
+		cmd := state.cmd
+		index := state.index
 		go func() {
-			err := state.cmd.Wait()
+			// Note: different coroutine: we can't use the state here!
+			// (hence the copy of cmd/index)
+			err := cmd.Wait()
 			reader.Close()
-			m.playbackEnd <- err
+			m.playbackEnd <- playbackEndPayload{
+				err:          err,
+				cmdProcState: cmd.ProcessState,
+				sid:          sid,
+				index:        index,
+			}
 		}()
 		m.sendStatus(time.Now(), state)
 	}

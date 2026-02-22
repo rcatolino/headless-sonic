@@ -27,4 +27,3 @@ type Player interface {
 	Skip(int, int)
 	Stop()
 }
-
