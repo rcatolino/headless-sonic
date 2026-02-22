@@ -18,12 +18,13 @@ type StatusUpdater interface {
 }
 
 type Player interface {
-	Play() error
-	Pause()
+	Add(id string)
+	Clear()
+	Done() chan error
+	Insert(id string, index int)
+	Start()
+	Skip(int, int)
 	Stop()
 	TogglePlayPause()
-	Clear()
-	Add(id string)
-	Insert(id string, index int)
-	Done() chan error
 }
+

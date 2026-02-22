@@ -123,18 +123,14 @@ func processEvents(resp *http.Response, notificationChan chan error, musicPlayer
 			}
 
 			if len(event.Ids) > 0 {
-				err := musicPlayer.Play()
-				if err != nil {
-					logger.Warn("play() returned with error", "error", err)
-				}
+				musicPlayer.Start()
 			}
 		} else if event.Action == "start" {
-			err := musicPlayer.Play()
-			if err != nil {
-				logger.Warn("play() returned with error", "error", err)
-			}
+			musicPlayer.Start()
 		} else if event.Action == "stop" {
 			musicPlayer.Stop()
+		} else if event.Action == "skip" {
+			musicPlayer.Skip(event.Index, event.Offset)
 		}
 	}
 }
